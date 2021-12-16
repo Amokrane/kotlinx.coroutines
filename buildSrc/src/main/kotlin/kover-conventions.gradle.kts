@@ -9,8 +9,8 @@ val coverless = sourceless + internal + unpublished
 subprojects {
     if (name in coverless) return@subprojects
     apply(plugin = "kover")
-    tasks.filterIsInstance<Test>().forEach {
-        it.extensions.configure<KoverTaskExtension> {
+    tasks.withType<Test>().all {
+        extensions.configure<KoverTaskExtension> {
             isEnabled = coverageEnabled
         }
     }

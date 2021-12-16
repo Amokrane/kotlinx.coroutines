@@ -1,4 +1,5 @@
 import kotlinx.kover.api.*
+import kotlinx.kover.tasks.*
 
 /*
  * Copyright 2016-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
@@ -26,6 +27,14 @@ dependencies {
 tasks.withType<Test> {
     extensions.configure<KoverTaskExtension> {
         excludes = excludes + listOf("com.android.*", "android.*") // Robolectric
+    }
+}
+
+tasks.withType<KoverVerificationTask> {
+    rule {
+        bound {
+            minValue = 50 // COVERED_LINES_PERCENTAGE
+        }
     }
 }
 

@@ -107,6 +107,7 @@ allprojects {
 
 apply plugin: "binary-compatibility-validator"
 apply plugin: 'base'
+apply plugin: 'kover-conventions'
 
 apiValidation {
     ignoredProjects += unpublished + ["kotlinx-coroutines-bom"]
@@ -305,7 +306,6 @@ def publishTasks = getTasksByName("publish", true) + getTasksByName("publishNpm"
 task deploy(dependsOn: publishTasks)
 
 apply plugin: 'animalsniffer-conventions'
-apply plugin: 'kover-conventions'
 
 clean.dependsOn gradle.includedBuilds.collect { it.task(':clean') }
 

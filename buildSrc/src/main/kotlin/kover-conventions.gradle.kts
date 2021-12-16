@@ -11,7 +11,7 @@ subprojects {
     apply(plugin = "kover")
     tasks.filterIsInstance<Test>().forEach {
         it.extensions.configure<KoverTaskExtension> {
-            isEnabled = false
+            isEnabled = coverageEnabled
         }
     }
 }

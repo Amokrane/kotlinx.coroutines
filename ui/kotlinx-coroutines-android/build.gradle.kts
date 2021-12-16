@@ -31,11 +31,7 @@ tasks.withType<Test> {
 }
 
 tasks.withType<KoverVerificationTask> {
-    rule {
-        bound {
-            minValue = 50 // COVERED_LINES_PERCENTAGE
-        }
-    }
+    rules[0].bounds[0].minValue = 50
 }
 
 val optimizedDexDir = File(buildDir, "dex-optim/")

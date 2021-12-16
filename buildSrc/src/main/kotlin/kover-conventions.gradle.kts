@@ -19,7 +19,7 @@ subprojects {
     tasks.withType<KoverVerificationTask> {
         rule {
             bound {
-                minValue = 85 // COVERED_LINES_PERCENTAGE
+                minValue = minValue ?: 85 // COVERED_LINES_PERCENTAGE
             }
         }
     }

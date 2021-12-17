@@ -279,7 +279,7 @@ public class PublisherCoroutine<in T>(
                 if (cur == 0L) {
                     /** In a sense, after a successful CAS, it is this invocation, not the coroutine itself, that owns
                      * the lock, given that `upd` is necessarily strictly positive. Thus, no other operation has the
-                     * right to lower the value on [_nRequested], it can only grow or become [CLOSED]. Therefore, it is
+                     * right to lower the value on [_nRequested], it can only grow or become [CHANNEL_CLOSED]. Therefore, it is
                      * impossible for any other operations to assume that they own the lock without actually acquiring
                      * it. */
                     unlockAndCheckCompleted()

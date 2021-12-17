@@ -7,6 +7,7 @@ package kotlinx.coroutines.channels
 import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.*
 import org.junit.*
+import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.*
 import org.junit.runners.*

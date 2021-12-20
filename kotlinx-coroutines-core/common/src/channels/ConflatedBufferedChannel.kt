@@ -167,6 +167,19 @@ internal open class ConflatedBufferedChannel<E>(
         else super.isClosedForReceive
     }
 
+    override fun iterator(): ChannelIterator<E> = Itr2()
+
+    private inner class Itr2 : Itr() {
+        override suspend fun hasNext(): Boolean {
+            this@ConflatedBufferedChannel.lock.lock()
+            return super.hasNext()
+        }
+
+        override fun onHasNextFinishedWithoutEnqueueing() {
+            this@ConflatedBufferedChannel.lock.unlock()
+        }
+    }
+
     // #######################
     // ## Select Expression ##
     // #######################
@@ -194,5 +207,9 @@ internal open class ConflatedBufferedChannel<E>(
                 return
             }
         super.registerSelectForReceive(select, ignoredParam)
+    }
+
+    override fun onRegisterSelectXXX() {
+        lock.unlock()
     }
 }

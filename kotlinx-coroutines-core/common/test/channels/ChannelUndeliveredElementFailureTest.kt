@@ -12,6 +12,7 @@ import kotlin.test.*
 /**
  * Tests for failures inside `onUndeliveredElement` handler in [Channel].
  */
+@Ignore
 class ChannelUndeliveredElementFailureTest : TestBase() {
     private val item = "LOST"
     private val onCancelFail: (String) -> Unit = { throw TestException(it) }

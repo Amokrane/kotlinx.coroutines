@@ -141,7 +141,6 @@ internal open class ConflatedBufferedChannel<E>(
     override suspend fun send(element: E) {
         val attempt = trySend(element)
         if (attempt.isClosed) {
-            onUndeliveredElement?.invoke(element)
             throw sendException(attempt.exceptionOrNull())
         }
     }

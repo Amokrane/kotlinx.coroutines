@@ -56,7 +56,7 @@ abstract class ChannelLincheckTestBase(
     private val sequentialSpecification: Class<*>
 ) : AbstractLincheckTest() {
 
-    @Operation(promptCancellation = false, allowExtraSuspension = true)
+    @Operation(allowExtraSuspension = true)
     suspend fun send(@Param(name = "value") value: Int): Any = try {
         c.send(value)
     } catch (e: NumberedCancellationException) {
@@ -72,21 +72,21 @@ abstract class ChannelLincheckTestBase(
             else false
         }
 
-//    @Operation(promptCancellation = false)
+    @Operation(allowExtraSuspension = true)
     suspend fun sendViaSelect(@Param(name = "value") value: Int): Any = try {
         select<Unit> { c.onSend(value) {} }
     } catch (e: NumberedCancellationException) {
         e.testResult
     }
 
-    @Operation(cancellableOnSuspension = true, allowExtraSuspension = true, blocking = true)
+    @Operation(blocking = true)
     suspend fun receive(): Any = try {
         c.receive()
     } catch (e: NumberedCancellationException) {
         e.testResult
     }
 
-    @Operation(cancellableOnSuspension = true, allowExtraSuspension = true, blocking = true)
+    @Operation(blocking = true)
     suspend fun receiveCatching(): Any = c.receiveCatching()
         .onSuccess { return it }
         .onClosed { e -> return (e as NumberedCancellationException).testResult }
@@ -98,7 +98,7 @@ abstract class ChannelLincheckTestBase(
             .onSuccess { return it }
             .onFailure { return if (it is NumberedCancellationException) it.testResult else null }
 
-//    @Operation(promptCancellation = true)
+    @Operation(blocking = true)
     suspend fun receiveViaSelect(): Any = try {
         select<Int> { c.onReceive { it } }
     } catch (e: NumberedCancellationException) {
@@ -108,17 +108,20 @@ abstract class ChannelLincheckTestBase(
     @Operation(causesBlocking = true)
     fun close(@Param(name = "closeToken") token: Int): Boolean = c.close(NumberedCancellationException(token))
 
-//    @Operation
+    @Operation(causesBlocking = true)
     fun cancel(@Param(name = "closeToken") token: Int) = c.cancel(NumberedCancellationException(token))
 
-    @Operation
+    // @Operation TODO not linearizable :(
     fun isClosedForReceive() = c.isClosedForReceive
 
     @Operation
     fun isClosedForSend() = c.isClosedForSend
 
-    @Operation
+    // @Operation TODO not linearizable :(
     fun isEmpty() = c.isEmpty
+
+    @StateRepresentation
+    fun state() = c.toString()
 
     override fun <O : Options<O, *>> O.customize(isStressTest: Boolean): O =
         actorsBefore(0).sequentialSpecification(sequentialSpecification)

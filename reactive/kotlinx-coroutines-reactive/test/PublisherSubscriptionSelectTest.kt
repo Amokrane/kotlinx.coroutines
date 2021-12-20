@@ -7,13 +7,11 @@ package kotlinx.coroutines.reactive
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.selects.*
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.*
 import org.junit.runners.*
 import kotlin.test.*
 
-@Ignore
 @RunWith(Parameterized::class)
 class PublisherSubscriptionSelectTest(private val request: Int) : TestBase() {
     companion object {

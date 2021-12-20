@@ -40,7 +40,7 @@ internal open class BufferedChannel<E>(
         val s = ChannelSegment<E>(0, null, 3)
         sendSegment = atomic(s)
         receiveSegment = atomic(s)
-        bufferEndSegment = atomic(s)
+        bufferEndSegment = atomic(s) // TODO: rendezvous
     }
 
     // For debug info
@@ -56,7 +56,7 @@ internal open class BufferedChannel<E>(
 
     override fun trySend(element: E): ChannelResult<Unit> {
         val possible = unlimited || senders.value.let { it < receivers.value || !rendezvous && it < bufferEnd.value }
-        if (!possible && closeStatus.value == 0) return failure()
+        if (!possible && closeStatus.value <= 0) return failure()
         sendImpl(
             element = element,
             startSegment = this.sendSegment.value,
@@ -72,11 +72,11 @@ internal open class BufferedChannel<E>(
     public override suspend fun send(element: E): Unit {
         var segm = sendSegment.value
         while (true) {
-//            if (closeStatus.value > 0) {
-//                if (closeStatus.value == 1) completeClose() else completeCancel()
-//                onUndeliveredElement?.invoke(element);
-//                throw recoverStackTrace(sendException(getCause()))
-//            }
+            if (closeStatus.value > 0) {
+                if (closeStatus.value == 1) completeClose() else completeCancel()
+                onUndeliveredElement?.invoke(element)
+                throw recoverStackTrace(sendException(getCause()))
+            }
             val s = senders.getAndIncrement()
             val id = s / SEGMENT_SIZE
             val i = (s % SEGMENT_SIZE).toInt()
@@ -115,6 +115,7 @@ internal open class BufferedChannel<E>(
         while (true) {
             if (closeStatus.value > 0) {
                 if (closeStatus.value == 1) completeClose() else completeCancel()
+                onUndeliveredElement?.invoke(element)
                 onClosed()
                 return
             }
@@ -262,7 +263,10 @@ internal open class BufferedChannel<E>(
                     segm.setState(i, DONE) // we can safely avoid CAS here
                     segm.setElementLazy(i, null)
                     val receiver = if (state is WaiterEB) state.waiter else state
-                    return if (receiver.tryResumeReceiver(element)) RENDEZVOUS else FAILED
+                    return if (receiver.tryResumeReceiver(element)) {
+                        onReceiveDequeued()
+                        RENDEZVOUS
+                    } else FAILED
                 }
             }
         }
@@ -322,10 +326,10 @@ internal open class BufferedChannel<E>(
     override suspend fun receive(): E {
         var segm = receiveSegment.value
         while (true) {
-//            if (closeStatus.value == 2) {
-//                completeCancel()
-//                throw recoverStackTrace(receiveException(getCause()))
-//            }
+            if (closeStatus.value == 2) {
+                completeCancel()
+                throw recoverStackTrace(receiveException(getCause()))
+            }
             val r = this.receivers.getAndIncrement()
             val id = r / SEGMENT_SIZE
             val i = (r % SEGMENT_SIZE).toInt()
@@ -392,7 +396,7 @@ internal open class BufferedChannel<E>(
     }
 
     override fun tryReceive(): ChannelResult<E> {
-        if (receivers.value >= senders.value && closeStatus.value == 0) return failure()
+        if (receivers.value >= senders.value && closeStatus.value <= 0) return failure()
         receiveImpl(
             startSegment = receiveSegment.value,
             waiter = INTERRUPTED,
@@ -464,7 +468,7 @@ internal open class BufferedChannel<E>(
         val result = updateCellReceive(segm, i, r, cont)
         when {
             result === SUSPEND -> {
-                cont.invokeOnCancellation { segm.onCancellation(i) }
+                cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() }
                 onReceiveEnqueued()
             }
             result === FAILED -> {
@@ -475,10 +479,9 @@ internal open class BufferedChannel<E>(
                         cont.resume(element) {
                             onUndeliveredElement?.callUndeliveredElement(element, cont.context)
                         };
-                        onReceiveEnqueued()
                     },
-                    onSuspend = { segm, i -> cont.invokeOnCancellation { segm.onCancellation(i) }; onReceiveEnqueued() },
-                    onClosed = { cont.resumeWithException(receiveException(getCause())); onReceiveEnqueued() },
+                    onSuspend = { segm, i -> cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() }; onReceiveEnqueued() },
+                    onClosed = { cont.resumeWithException(receiveException(getCause())); },
                     onNoWaiter = { _, _, _ -> error("unexpected") }
                 )
             }
@@ -486,7 +489,6 @@ internal open class BufferedChannel<E>(
                 cont.resume(result as E) {
                     onUndeliveredElement?.callUndeliveredElement(result, cont.context)
                 }
-                onReceiveEnqueued()
             }
         }
     }
@@ -500,8 +502,8 @@ internal open class BufferedChannel<E>(
         val result = updateCellReceive(segm, i, r, waiter)
         when {
             result === SUSPEND -> {
+                cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() }
                 onReceiveEnqueued()
-                cont.invokeOnCancellation { segm.onCancellation(i) }
             }
             result === FAILED -> {
                 receiveImpl<Any?>(
@@ -511,15 +513,13 @@ internal open class BufferedChannel<E>(
                         cont.resume(success(element)) {
                             onUndeliveredElement?.callUndeliveredElement(element, cont.context)
                         }
-                        onReceiveEnqueued()
                     },
-                    onSuspend = { segm, i -> cont.invokeOnCancellation { segm.onCancellation(i) }; onReceiveEnqueued() },
-                    onClosed = { cont.resume(closed(getCause())); onReceiveEnqueued() },
+                    onSuspend = { segm, i -> cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() }; onReceiveEnqueued() },
+                    onClosed = { cont.resume(closed(getCause())) },
                     onNoWaiter = { _, _, _ -> error("unexpected") }
                 )
             }
             else -> {
-                onReceiveEnqueued()
                 cont.resume(success(result as E)) {
                     onUndeliveredElement?.callUndeliveredElement(result, cont.context)
                 }
@@ -582,6 +582,7 @@ internal open class BufferedChannel<E>(
                         val sender = if (state is WaiterEB) state.waiter else state
                         if (sender.tryResumeSender()) {
                             segm.setState(i, DONE)
+                            expandBuffer()
                             return segm.retrieveElement(i)
                         } else {
                             if (!segm.casState(i, RESUMING_R, INTERRUPTED_R) || helpExpandBuffer)
@@ -1003,6 +1004,7 @@ internal open class BufferedChannel<E>(
         // on cancellation
         override fun invoke(cause: Throwable?) {
             segment?.onCancellation(i)
+            onReceiveDequeued()
         }
 
         protected open fun onHasNextFinishedWithoutEnqueueing() {}
@@ -1116,8 +1118,19 @@ internal open class BufferedChannel<E>(
 
     @ExperimentalCoroutinesApi
     override val isClosedForSend: Boolean
-        get() = (closeStatus.value > 0).also {
-            if (it) completeClose()
+        get() = closeStatus.value.let {
+            when (it) {
+                0, -1 -> false
+                1 -> {
+                    completeClose()
+                    true
+                }
+                2 -> {
+                    completeCancel()
+                    true
+                }
+                else -> error("")
+            }
         }
 
     @ExperimentalCoroutinesApi
@@ -1151,6 +1164,8 @@ internal open class BufferedChannel<E>(
             if (closeStatus.value == 2) {
                 completeCancel()
                 return false
+            } else if (closeStatus.value == 1) {
+                completeClose()
             }
             val r = receivers.value
             val s = senders.value
@@ -1199,7 +1214,7 @@ internal open class BufferedChannel<E>(
                 state === CHANNEL_CLOSED -> return true
                 state === DONE -> return true
                 state === BROKEN -> return true
-                state === RESUMING_EB -> continue // spin-wait
+                state === RESUMING_EB || state === RESUMING_R_EB -> continue // spin-wait
                 else -> return receivers.value != r
             }
         }

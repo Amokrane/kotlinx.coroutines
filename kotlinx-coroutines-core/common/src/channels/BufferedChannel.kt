@@ -33,7 +33,7 @@ internal open class BufferedChannel<E>(
 
     private val sendSegment: AtomicRef<ChannelSegment<E>>
     private val receiveSegment: AtomicRef<ChannelSegment<E>>
-    private val bufferEndSegment: AtomicRef<ChannelSegment<E>>
+    private val bufferEndSegment: AtomicRef<ChannelSegment<E>?>
 
     private val closeStatus = atomic(0) // 1 -- CLOSED, 2 -- CANCELLED
 
@@ -41,7 +41,7 @@ internal open class BufferedChannel<E>(
         val s = ChannelSegment<E>(0, null, 3)
         sendSegment = atomic(s)
         receiveSegment = atomic(s)
-        bufferEndSegment = atomic(s) // TODO: rendezvous
+        bufferEndSegment = atomic(if (rendezvous || unlimited) null else s) // TODO: rendezvous
     }
 
     // For debug info
@@ -75,7 +75,7 @@ internal open class BufferedChannel<E>(
         while (true) {
             if (closeStatus.value > 0) {
                 if (closeStatus.value == 1) completeClose() else completeCancel()
-                onUndeliveredElement?.invoke(element)
+                onUndeliveredElement?.callUndeliveredElement(element, coroutineContext)
                 throw recoverStackTrace(sendException(getCause()))
             }
             val s = senders.getAndIncrement()
@@ -116,14 +116,19 @@ internal open class BufferedChannel<E>(
         while (true) {
             if (closeStatus.value > 0) {
                 if (closeStatus.value == 1) completeClose() else completeCancel()
-                onUndeliveredElement?.invoke(element)
                 onClosed()
                 return
             }
             val s = senders.getAndIncrement()
             val id = s / SEGMENT_SIZE
             val i = (s % SEGMENT_SIZE).toInt()
-            if (segm.id != id)  segm = findSegmentSend(id, segm, element)
+            if (segm.id != id)  segm = findSegmentSendImpl(id, segm).let {
+                if (it.isClosed) {
+                    onClosed()
+                    return
+                }
+                it.segment
+            }
             if (segm.id != id) {
                 senders.compareAndSet(s + 1, segm.id * SEGMENT_SIZE)
                 continue
@@ -159,8 +164,7 @@ internal open class BufferedChannel<E>(
             }
             result === SUSPEND -> {
                 cont.invokeOnCancellation {
-                    onUndeliveredElement?.invoke(segm.retrieveElement(i))
-                    segm.onCancellation(i)
+                    segm.onCancellation(i, onUndeliveredElement, cont.context, cont)
                 }
             }
             result === FAILED -> {
@@ -174,13 +178,21 @@ internal open class BufferedChannel<E>(
         while (true) {
             if (closeStatus.value > 0) {
                 if (closeStatus.value == 1) completeClose() else completeCancel()
+                onUndeliveredElement?.callUndeliveredElement(element, cont.context)
                 cont.resumeWithException(sendException(getCause()))
                 return
             }
             val s = senders.getAndIncrement()
             val id = s / SEGMENT_SIZE
             val i = (s % SEGMENT_SIZE).toInt()
-            if (segm.id != id)  segm = findSegmentSend(id, segm, element)
+            if (segm.id != id)  segm = findSegmentSendImpl(id, segm).let {
+                if (it.isClosed) {
+                    onUndeliveredElement?.callUndeliveredElement(element, cont.context)
+                    cont.resumeWithException(sendException(getCause()))
+                    return
+                }
+                it.segment
+            }
             if (segm.id != id) {
                 senders.compareAndSet(s + 1, segm.id * SEGMENT_SIZE)
                 continue
@@ -192,7 +204,7 @@ internal open class BufferedChannel<E>(
                     return
                 }
                 result === SUSPEND -> {
-                    cont.invokeOnCancellation { segm.onCancellation(i) }
+                    cont.invokeOnCancellation { segm.onCancellation(i, onUndeliveredElement, cont.context, cont) }
                     return
                 }
                 result === FAILED -> continue
@@ -276,8 +288,7 @@ internal open class BufferedChannel<E>(
     private fun Any.tryResumeReceiver(element: E): Boolean {
         return when(this) {
             is SelectInstance<*> -> {
-                // TODO onUndeliveredElement
-                this.trySelect(this@BufferedChannel, element)
+                this.trySelect(this@BufferedChannel, element, onUndeliveredElement?.bindCancellationFun(element, this.context))
             }
             is ReceiveCatching<*> -> {
                 this as ReceiveCatching<E>
@@ -322,6 +333,13 @@ internal open class BufferedChannel<E>(
             } else it.segment
         }
 
+    private fun findSegmentSendImpl(id: Long, start: ChannelSegment<E>): SegmentOrClosed<ChannelSegment<E>> =
+        sendSegment.findSegmentAndMoveForward(id, start, ::createSegment).let {
+            if (it.isClosed) {
+                if (closeStatus.value == 1) completeClose() else completeCancel()
+            }
+            return it
+        }
 
 
     override suspend fun receive(): E {
@@ -481,7 +499,7 @@ internal open class BufferedChannel<E>(
                             onUndeliveredElement?.callUndeliveredElement(element, cont.context)
                         };
                     },
-                    onSuspend = { segm, i -> cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() }; onReceiveEnqueued() },
+                    onSuspend = { segm, i -> onReceiveEnqueued(); cont.invokeOnCancellation { segm.onCancellation(i); onReceiveDequeued() } },
                     onClosed = { cont.resumeWithException(receiveException(getCause())); },
                     onNoWaiter = { _, _, _ -> error("unexpected") }
                 )
@@ -549,20 +567,22 @@ internal open class BufferedChannel<E>(
                             expandBuffer()
                             return SUSPEND
                         } else {
-                            val element = segm.retrieveElement(i)
+                            val element = segm.readElement(i)
                             if (segm.getState(i) === state) {
-                                expandBuffer()
                                 segm.setState(i, DONE)
+                                segm.setElementLazy(i, null)
+                                expandBuffer()
                                 return element
                             }
                         }
                     }
                 }
                 state === BUFFERED -> {
-                    val element = segm.retrieveElement(i)
+                    val element = segm.readElement(i)
                     if (segm.getState(i) === BUFFERED) {
-                        expandBuffer()
                         segm.setState(i, DONE)
+                        segm.setElementLazy(i, null)
+                        expandBuffer()
                         return element
                     }
                 }
@@ -583,9 +603,9 @@ internal open class BufferedChannel<E>(
                         val sender = if (state is WaiterEB) state.waiter else state
                         if (sender.tryResumeSender()) {
                             segm.setState(i, DONE)
-                            expandBuffer()
-                            return segm.retrieveElement(i)
+                            return segm.retrieveElement(i).also { expandBuffer() }
                         } else {
+                            onUndeliveredElement?.invoke(segm.retrieveElement(i))
                             if (!segm.casState(i, RESUMING_R, INTERRUPTED_R) || helpExpandBuffer)
                                 expandBuffer()
                             return FAILED
@@ -618,7 +638,7 @@ internal open class BufferedChannel<E>(
 
     private fun expandBuffer() {
         if (rendezvous || unlimited) return
-        var segm = bufferEndSegment.value
+        var segm = bufferEndSegment.value!!
         try_again@ while (true) {
             val b = bufferEnd.getAndIncrement()
             val s = senders.value
@@ -666,6 +686,7 @@ internal open class BufferedChannel<E>(
                                 true
                             } else {
                                 segm.setState(i, INTERRUPTED)
+                                onUndeliveredElement?.invoke(segm.retrieveElement(i))
                                 false
                             }
                         }
@@ -676,7 +697,7 @@ internal open class BufferedChannel<E>(
     }
 
     private fun findSegmentBuffer(id: Long, start: ChannelSegment<E>) =
-        bufferEndSegment.findSegmentAndMoveForward(id, start, ::createSegment)
+        (bufferEndSegment as AtomicRef<ChannelSegment<E>>).findSegmentAndMoveForward(id, start, ::createSegment)
 
 
     // #######################
@@ -712,7 +733,11 @@ internal open class BufferedChannel<E>(
             startSegment = sendSegment.value,
             waiter = select,
             onRendezvous = { select.selectInRegistrationPhase(Unit) },
-            onSuspend = { segm, i -> select.disposeOnCompletion { segm.onCancellation(i) } },
+            onSuspend = { segm, i ->
+                select.disposeOnCompletion {
+                    segm.onCancellation(i, onUndeliveredElement, select.context, select)
+                }
+            },
             onClosed = { select.selectInRegistrationPhase(CHANNEL_CLOSED) },
             onNoWaiter = { _, _, _, _ -> error("unexpected") }
         )
@@ -749,9 +774,9 @@ internal open class BufferedChannel<E>(
         if (selectResult === CHANNEL_CLOSED) closed(closeCause.value as Throwable?)
         else success(selectResult as E)
 
-    protected val onUndeliveredElementReceiveCancellationConstructor: OnCancellationConstructor? = onUndeliveredElement?.let {
+    private val onUndeliveredElementReceiveCancellationConstructor: OnCancellationConstructor? = onUndeliveredElement?.let {
         { select: SelectInstance<*>, ignoredParam: Any?, element: Any? ->
-            { cause: Throwable -> if (element !is Closed) onUndeliveredElement.callUndeliveredElement(element as E, select.context) }
+            { cause: Throwable -> if (element !== CHANNEL_CLOSED) onUndeliveredElement.callUndeliveredElement(element as E, select.context) }
         }
     }
 
@@ -821,8 +846,11 @@ internal open class BufferedChannel<E>(
 
     private fun closeQueue(): ChannelSegment<E> {
         var segm = bufferEndSegment.value
-        sendSegment.value.let { if (it.id > segm.id) segm = it }
-        return segm.close()
+        sendSegment.value.let {
+            val segm0 = segm
+            if (segm0 == null || it.id > segm0.id) segm = it
+        }
+        return segm!!.close()
     }
 
     private fun invokeCloseHandler() {
@@ -884,6 +912,10 @@ internal open class BufferedChannel<E>(
     }
 
     private fun removeRemainingBufferedElements() {
+        // clear buffer first, but do not wait for it in helpers
+        val onUndeliveredElement = onUndeliveredElement
+        var undeliveredElementException: UndeliveredElementException? = null // first cancel exception, others suppressed
+
         var segm: ChannelSegment<E> = sendSegment.value
         while (true) {
             segm = segm.next ?: break
@@ -896,25 +928,25 @@ internal open class BufferedChannel<E>(
                     if (receivers.value > c) return
                     when {
                         state === BUFFERED -> if (segm.casState(i, state, CHANNEL_CLOSED)) {
-                            onUndeliveredElement?.invoke(segm.retrieveElement(i))
+                            if (onUndeliveredElement != null) {
+                                undeliveredElementException = onUndeliveredElement.callUndeliveredElementCatchingException(segm.retrieveElement(i), undeliveredElementException)
+                            }
                             segm.onCancellation(i)
                             break
                         }
-                        state === BUFFERED || state === BUFFERING || state === null -> if (segm.casState(i, state, CHANNEL_CLOSED)) {
+                        state === BUFFERING || state === null -> if (segm.casState(i, state, CHANNEL_CLOSED)) {
                             segm.onCancellation(i)
                             break
                         }
                         state is WaiterEB -> {
                             if (segm.casState(i, state, CHANNEL_CLOSED)) {
                                 state.waiter.closeSender()
-                                onUndeliveredElement?.invoke(segm.retrieveElement(i))
                                 break
                             }
                         }
                         state is CancellableContinuation<*> || state is SelectInstance<*>  -> {
                             if (segm.casState(i, state, CHANNEL_CLOSED)) {
                                 state.closeSender()
-                                onUndeliveredElement?.invoke(segm.retrieveElement(i))
                                 break
                             }
                         }
@@ -925,6 +957,7 @@ internal open class BufferedChannel<E>(
             }
             segm = segm.prev ?: break
         }
+        undeliveredElementException?.let { throw it } // throw UndeliveredElementException at the end if there was one
     }
 
     private fun removeWaitingRequests(lastSegment: ChannelSegment<E>) {
@@ -1071,7 +1104,9 @@ internal open class BufferedChannel<E>(
                         this.receiveResult = result
                         this.cont = null
                         onHasNextFinishedWithoutEnqueueing()
-                        cont.resume(true)
+                        cont.resume(true) {
+                            onUndeliveredElement?.callUndeliveredElement(result as E, cont.context)
+                        }
                         return@sc
                     }
                     result === NO_WAITER -> error("unexpected")
@@ -1250,19 +1285,25 @@ internal class ChannelSegment<E>(id: Long, prev: ChannelSegment<E>?, pointers: I
         setElementLazy(i, element)
     }
 
-    fun retrieveElement(i: Int): E {
+    fun retrieveElement(i: Int): E = readElement(i).also { setElementLazy(i, null) }
+
+    fun readElement(i: Int): E {
         val element = getElement(i)
-//        setElementLazy(i, null)
         return (if (element === NULL_ELEMENT) null else element) as E
+
     }
 
-    fun onCancellation(i: Int) {
-        data[i * 2 + 1].update {
+    fun onCancellation(i: Int, onUndeliveredElement: OnUndeliveredElement<E>? = null, context: CoroutineContext? = null, expectedWaiter: Any? = null) {
+        val element = getElement(i)
+        val waiter = data[i * 2 + 1].getAndUpdate {
             if (it === RESUMING_R || it === RESUMING_EB || it === RESUMING_R_EB ||
                 it === INTERRUPTED || it === INTERRUPTED_R || it === INTERRUPTED_EB ||
-                it === CHANNEL_CLOSED || it is WaiterEB
+                it === CHANNEL_CLOSED || it is WaiterEB ||  it === BUFFERED
             ) return
             INTERRUPTED
+        }
+        if (waiter === expectedWaiter) {
+            onUndeliveredElement?.callUndeliveredElement(element as E, context!!)
         }
         onSlotCleaned()
     }

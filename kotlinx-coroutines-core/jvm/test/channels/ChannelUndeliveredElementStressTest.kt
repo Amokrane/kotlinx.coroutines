@@ -38,8 +38,8 @@ class ChannelUndeliveredElementStressTest(private val kind: TestChannelKind) : T
     private val scope = CoroutineScope(dispatcher)
 
     private val channel = kind.create<Data> { it.failedToDeliver() }
-    private val senderDone = Channel<Boolean>(1)
-    private val receiverDone = Channel<Boolean>(1)
+    private val senderDone = Channel<Boolean>(Channel.UNLIMITED)
+    private val receiverDone = Channel<Boolean>(Channel.UNLIMITED)
 
     @Volatile
     private var lastReceived = -1L
@@ -157,7 +157,7 @@ class ChannelUndeliveredElementStressTest(private val kind: TestChannelKind) : T
                 var counter = 0
                 while (true) {
                     val trySendData = Data(sentCnt++)
-                    val sendMode = Random.nextInt(2) + 1
+                    val sendMode = Random.nextInt(1) + 1
                     sentStatus[trySendData.x] = sendMode
                     when (sendMode) {
                         1 -> channel.send(trySendData)
@@ -189,10 +189,10 @@ class ChannelUndeliveredElementStressTest(private val kind: TestChannelKind) : T
                     val receiveMode = Random.nextInt(6) + 1
                     val receivedData = when (receiveMode) {
                         1 -> channel.receive()
-                        2 -> select { channel.onReceive { it } }
-                        3 -> channel.receiveCatching().getOrElse { error("Should not be closed") }
-                        4 -> select { channel.onReceiveCatching { it.getOrElse { error("Should not be closed") } } }
-                        5 -> channel.receiveCatching().getOrThrow()
+                        2 -> channel.receiveCatching().getOrElse { error("Should not be closed") }
+                        3 -> channel.receiveCatching().getOrThrow()
+                        4 -> select { channel.onReceive { it } }
+                        5 -> select { channel.onReceiveCatching { it.getOrElse { error("Should not be closed") } } }
                         6 -> {
                             val iterator = channel.iterator()
                             check(iterator.hasNext()) { "Should not be closed" }

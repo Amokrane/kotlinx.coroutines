@@ -7,8 +7,10 @@ package kotlinx.coroutines.channels
 import kotlinx.atomicfu.locks.*
 import kotlinx.coroutines.channels.BufferOverflow.*
 import kotlinx.coroutines.channels.ChannelResult.Companion.success
+import kotlinx.coroutines.internal.callUndeliveredElement
 import kotlinx.coroutines.internal.OnUndeliveredElement
 import kotlinx.coroutines.selects.*
+import kotlin.coroutines.*
 import kotlin.math.*
 
 /**
@@ -141,6 +143,7 @@ internal open class ConflatedBufferedChannel<E>(
     override suspend fun send(element: E) {
         val attempt = trySend(element)
         if (attempt.isClosed) {
+            onUndeliveredElement?.callUndeliveredElement(element, coroutineContext)
             throw sendException(attempt.exceptionOrNull())
         }
     }

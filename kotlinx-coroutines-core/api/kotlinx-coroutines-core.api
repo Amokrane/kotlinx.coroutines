@@ -494,6 +494,10 @@ public final class kotlinx/coroutines/NonDisposableHandle : kotlinx/coroutines/C
 public abstract interface annotation class kotlinx/coroutines/ObsoleteCoroutinesApi : java/lang/annotation/Annotation {
 }
 
+public abstract interface class kotlinx/coroutines/OnCancellation {
+	public abstract fun invoke (Ljava/lang/Object;Ljava/lang/Throwable;Lkotlin/coroutines/CoroutineContext;)V
+}
+
 public abstract interface class kotlinx/coroutines/ParentJob : kotlinx/coroutines/Job {
 	public abstract fun getChildJobCancellationCause ()Ljava/util/concurrent/CancellationException;
 }

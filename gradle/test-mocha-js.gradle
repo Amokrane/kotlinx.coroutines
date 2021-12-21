@@ -99,5 +99,5 @@ task testMochaJsdom(type: NodeTask, dependsOn: [compileTestJsLegacy, installDepe
     if (project.hasProperty("teamcity")) args += ['--reporter', 'mocha-teamcity-reporter']
 }
 
-jsLegacyTestTask.dependsOn testMochaJsdom
+//jsLegacyTestTask.dependsOn testMochaJsdom TODO
 

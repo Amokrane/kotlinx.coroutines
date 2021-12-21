@@ -9,6 +9,7 @@ import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.selects.*
 import kotlin.coroutines.*
 import kotlin.jvm.*
+import kotlin.native.concurrent.*
 
 internal open class BufferedChannel<E>(
     capacity: Int,
@@ -1305,4 +1306,6 @@ private val RENDEZVOUS = Symbol("RENDEZVOUS")
 private val SUSPEND = Symbol("SUSPEND")
 private val NO_WAITER = Symbol("NO_WAITER")
 private val FAILED = Symbol("FAILED")
+
+@SharedImmutable
 internal val CHANNEL_CLOSED = Symbol("CHANNEL_CLOSED")

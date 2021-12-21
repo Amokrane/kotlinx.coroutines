@@ -633,7 +633,9 @@ internal open class BufferedChannel<E>(
     }
 
     private fun findSegmentReceive(id: Long, start: ChannelSegment<E>) =
-        receiveSegment.findSegmentAndMoveForward(id, start, ::createSegment)
+        receiveSegment.findSegmentAndMoveForward(id, start, ::createSegment).also {
+            if (!it.isClosed) it.segment.cleanPrev()
+        }
 
 
     private fun expandBuffer() {
@@ -738,7 +740,7 @@ internal open class BufferedChannel<E>(
                     segm.onCancellation(i, onUndeliveredElement, select.context, select)
                 }
             },
-            onClosed = { select.selectInRegistrationPhase(CHANNEL_CLOSED) },
+            onClosed = { select.selectInRegistrationPhase(CHANNEL_CLOSED); onUndeliveredElement?.callUndeliveredElement(element, select.context) },
             onNoWaiter = { _, _, _, _ -> error("unexpected") }
         )
     }

@@ -89,37 +89,37 @@ kotlin {
             binaries.getTest("DEBUG").freeCompilerArgs += ["-e", "kotlinx.coroutines.mainNoExit"]
         }
 
-        binaries.test("newMM", [DEBUG]) {
-            def thisTest = it
-            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainNoExit"]
-            optimized = true
-            binaryOptions["memoryModel"] = "experimental"
-            testRuns.create("newMM") {
-                setExecutionSourceFrom(thisTest)
-                // A hack to get different suffixes in the aggregated report.
-                executionTask.configure { targetName = "$targetName new MM" }
-            }
-        }
-
-        binaries.test("worker",  [DEBUG]) {
-            def thisTest = it
-            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainBackground"]
-            testRuns.create("worker") {
-                setExecutionSourceFrom(thisTest)
-                executionTask.configure { targetName = "$targetName worker" }
-            }
-        }
-
-        binaries.test("workerWithNewMM", [DEBUG]) {
-            def thisTest = it
-            optimized = true
-            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainBackground"]
-            binaryOptions["memoryModel"] = "experimental"
-            testRuns.create("workerWithNewMM") {
-                setExecutionSourceFrom(thisTest)
-                executionTask.configure { targetName = "$targetName worker with new MM" }
-            }
-        }
+//        binaries.test("newMM", [DEBUG]) {
+//            def thisTest = it
+//            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainNoExit"]
+//            optimized = true
+//            binaryOptions["memoryModel"] = "experimental"
+//            testRuns.create("newMM") {
+//                setExecutionSourceFrom(thisTest)
+//                // A hack to get different suffixes in the aggregated report.
+//                executionTask.configure { targetName = "$targetName new MM" }
+//            }
+//        }
+//
+//        binaries.test("worker",  [DEBUG]) {
+//            def thisTest = it
+//            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainBackground"]
+//            testRuns.create("worker") {
+//                setExecutionSourceFrom(thisTest)
+//                executionTask.configure { targetName = "$targetName worker" }
+//            }
+//        }
+//
+//        binaries.test("workerWithNewMM", [DEBUG]) {
+//            def thisTest = it
+//            optimized = true
+//            freeCompilerArgs += ["-e", "kotlinx.coroutines.mainBackground"]
+//            binaryOptions["memoryModel"] = "experimental"
+//            testRuns.create("workerWithNewMM") {
+//                setExecutionSourceFrom(thisTest)
+//                executionTask.configure { targetName = "$targetName worker with new MM" }
+//            }
+//        }
     }
 
     jvm {

@@ -169,9 +169,9 @@ internal open class ConflatedBufferedChannel<E>(
         else super.isClosedForReceive
     }
 
-    override fun iterator(): ChannelIterator<E> = Itr2()
+    override fun iterator(): ChannelIterator<E> = ConflatedChannelIterator()
 
-    private inner class Itr2 : Itr() {
+    private inner class ConflatedChannelIterator : BufferedChannelIterator() {
         override suspend fun hasNext(): Boolean {
             this@ConflatedBufferedChannel.lock.lock()
             return super.hasNext()

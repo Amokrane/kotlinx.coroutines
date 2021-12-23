@@ -38,8 +38,8 @@ class ChannelUndeliveredElementSelectOldStressTest(private val kind: TestChannel
     private val scope = CoroutineScope(dispatcher)
 
     private val channel = kind.create<Data> { it.failedToDeliver() }
-    private val senderDone = Channel<Boolean>(1)
-    private val receiverDone = Channel<Boolean>(1)
+    private val senderDone = Channel<Boolean>(Channel.UNLIMITED)
+    private val receiverDone = Channel<Boolean>(Channel.UNLIMITED)
 
     @Volatile
     private var lastReceived = -1L
@@ -134,9 +134,10 @@ class ChannelUndeliveredElementSelectOldStressTest(private val kind: TestChannel
                 var counter = 0
                 while (true) {
                     val trySendData = Data(sentCnt++)
-                    selectOld<Unit> {
-                        channel.onSend(trySendData) {}
-                    }
+                    channel.send(trySendData)
+//                    selectOld<Unit> {
+//                        channel.onSend(trySendData) {}
+//                    }
                     when {
                         // must artificially slow down LINKED_LIST sender to avoid overwhelming receiver and going OOM
                         kind == TestChannelKind.LINKED_LIST -> while (sentCnt > lastReceived + 100) yield()
@@ -158,16 +159,17 @@ class ChannelUndeliveredElementSelectOldStressTest(private val kind: TestChannel
         receiver = scope.launch(start = CoroutineStart.ATOMIC) {
             cancellable(receiverDone) {
                 while (true) {
-                    selectOld<Unit> {
-                        channel.onReceive {
+                      val it = channel.receive()
+//                    selectOld<Unit> {
+//                        channel.onReceive {
                             it.onReceived()
                             receivedCnt++
                             val received = it.x
                             if (received <= lastReceived)
                                 dupCnt++
                             lastReceived = received
-                        }
-                    }
+//                        }
+//                    }
                 }
             }
         }

@@ -157,7 +157,7 @@ class ChannelUndeliveredElementStressTest(private val kind: TestChannelKind) : T
                 var counter = 0
                 while (true) {
                     val trySendData = Data(sentCnt++)
-                    val sendMode = Random.nextInt(1) + 1
+                    val sendMode = Random.nextInt(2) + 1
                     sentStatus[trySendData.x] = sendMode
                     when (sendMode) {
                         1 -> channel.send(trySendData)

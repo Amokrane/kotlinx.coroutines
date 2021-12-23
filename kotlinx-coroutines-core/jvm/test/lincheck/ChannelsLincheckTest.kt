@@ -79,14 +79,14 @@ abstract class ChannelLincheckTestBase(
         e.testResult
     }
 
-    @Operation(blocking = true)
+    @Operation(allowExtraSuspension = true, blocking = true)
     suspend fun receive(): Any = try {
         c.receive()
     } catch (e: NumberedCancellationException) {
         e.testResult
     }
 
-    @Operation(blocking = true)
+    @Operation(allowExtraSuspension = true, blocking = true)
     suspend fun receiveCatching(): Any = c.receiveCatching()
         .onSuccess { return it }
         .onClosed { e -> return (e as NumberedCancellationException).testResult }
@@ -98,7 +98,7 @@ abstract class ChannelLincheckTestBase(
             .onSuccess { return it }
             .onFailure { return if (it is NumberedCancellationException) it.testResult else null }
 
-    @Operation(blocking = true)
+    @Operation(allowExtraSuspension = true, blocking = true)
     suspend fun receiveViaSelect(): Any = try {
         select<Int> { c.onReceive { it } }
     } catch (e: NumberedCancellationException) {

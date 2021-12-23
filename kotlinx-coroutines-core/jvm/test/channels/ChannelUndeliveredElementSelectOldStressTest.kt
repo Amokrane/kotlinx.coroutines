@@ -134,10 +134,9 @@ class ChannelUndeliveredElementSelectOldStressTest(private val kind: TestChannel
                 var counter = 0
                 while (true) {
                     val trySendData = Data(sentCnt++)
-                    channel.send(trySendData)
-//                    selectOld<Unit> {
-//                        channel.onSend(trySendData) {}
-//                    }
+                    selectOld<Unit> {
+                        channel.onSend(trySendData) {}
+                    }
                     when {
                         // must artificially slow down LINKED_LIST sender to avoid overwhelming receiver and going OOM
                         kind == TestChannelKind.LINKED_LIST -> while (sentCnt > lastReceived + 100) yield()
@@ -159,17 +158,16 @@ class ChannelUndeliveredElementSelectOldStressTest(private val kind: TestChannel
         receiver = scope.launch(start = CoroutineStart.ATOMIC) {
             cancellable(receiverDone) {
                 while (true) {
-                      val it = channel.receive()
-//                    selectOld<Unit> {
-//                        channel.onReceive {
+                    selectOld<Unit> {
+                        channel.onReceive {
                             it.onReceived()
                             receivedCnt++
                             val received = it.x
                             if (received <= lastReceived)
                                 dupCnt++
                             lastReceived = received
-//                        }
-//                    }
+                        }
+                    }
                 }
             }
         }

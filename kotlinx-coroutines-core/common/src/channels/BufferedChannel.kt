@@ -54,7 +54,7 @@ internal open class BufferedChannel<E>(
     override fun trySend(element: E): ChannelResult<Unit> {
         // Is this channel is closed for send?
         val sendersAndCloseStatusCur = sendersAndCloseStatus.value
-        if (sendersAndCloseStatusCur.isClosedForSend) return onClosedTrySend()
+        if (sendersAndCloseStatusCur.isClosedForSend0) return onClosedTrySend()
         // Do not try to send the value if the plain `send(e)` operation should suspend.
         // Specifically, `send(e)` is bound to suspend if the channel is NOT unlimited,
         // the number of receivers is greater than then index of the working cell of the
@@ -158,7 +158,7 @@ internal open class BufferedChannel<E>(
         var segm = sendSegment.value
         while (true) {
             val sendersAndCloseStatusCur = sendersAndCloseStatus.getAndIncrement()
-            val closed = sendersAndCloseStatusCur.isClosedForSend
+            val closed = sendersAndCloseStatusCur.isClosedForSend0
 
             val s = sendersAndCloseStatusCur.counter
             val id = s / SEGMENT_SIZE
@@ -435,7 +435,7 @@ internal open class BufferedChannel<E>(
         val r = receivers.value
         val sendersAndCloseStatusCur = sendersAndCloseStatus.value
         // Is this channel is closed for send?
-        if (sendersAndCloseStatusCur.isClosedForReceive) return onClosedTryReceive()
+        if (sendersAndCloseStatusCur.isClosedForReceive0) return onClosedTryReceive()
         // COMMENTS
         val s = sendersAndCloseStatusCur.counter
         if (r >= s) return failure()
@@ -575,7 +575,7 @@ internal open class BufferedChannel<E>(
             when {
                 state === null || state === BUFFERING -> {
                     val sendersAndCloseStatusCur = sendersAndCloseStatus.value
-                    if (sendersAndCloseStatusCur.isClosedForReceive) {
+                    if (sendersAndCloseStatusCur.isClosedForReceive0) {
                         segment.casState(i, state, CHANNEL_CLOSED)
                         continue
                     }
@@ -881,7 +881,7 @@ internal open class BufferedChannel<E>(
         }
 
     private fun completeCloseOrCancel() {
-        sendersAndCloseStatus.value.isClosedForSend
+        sendersAndCloseStatus.value.isClosedForSend0
     }
 
     override fun close(cause: Throwable?): Boolean = closeImpl(cause, false)
@@ -1191,16 +1191,16 @@ internal open class BufferedChannel<E>(
 
     @ExperimentalCoroutinesApi
     override val isClosedForSend: Boolean
-        get() = sendersAndCloseStatus.value.isClosedForSend
+        get() = sendersAndCloseStatus.value.isClosedForSend0
 
-    private val Long.isClosedForSend get() =
+    private val Long.isClosedForSend0 get() =
         isClosed(this, sendersCur = this.counter, isClosedForReceive = false)
 
     @ExperimentalCoroutinesApi
     override val isClosedForReceive: Boolean
-        get() = sendersAndCloseStatus.value.isClosedForReceive
+        get() = sendersAndCloseStatus.value.isClosedForReceive0
 
-    private val Long.isClosedForReceive get() =
+    private val Long.isClosedForReceive0 get() =
         isClosed(this, sendersCur = this.counter, isClosedForReceive = true)
 
     private fun isClosed(
@@ -1240,7 +1240,7 @@ internal open class BufferedChannel<E>(
     override val isEmpty: Boolean get() =
         // TODO: is it linearizable? If so,
         // TODO: I have no idea why.
-        if (sendersAndCloseStatus.value.isClosedForReceive) false
+        if (sendersAndCloseStatus.value.isClosedForReceive0) false
         else !hasElements()
 
     /**

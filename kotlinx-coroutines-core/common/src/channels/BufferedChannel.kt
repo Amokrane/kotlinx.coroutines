@@ -7,6 +7,7 @@ import kotlinx.coroutines.channels.ChannelResult.Companion.failure
 import kotlinx.coroutines.channels.ChannelResult.Companion.success
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.selects.*
+import kotlinx.coroutines.selects.TrySelectDetailedResult.*
 import kotlin.coroutines.*
 import kotlin.jvm.*
 import kotlin.native.concurrent.*
@@ -550,7 +551,7 @@ internal open class BufferedChannel<E>(
                 }
             }
             curState is Waiter -> if (segment.casState(i, curState, RESUMING_R)) {
-                return if (curState.tryResumeSender()) {
+                return if (curState.tryResumeSender(segment, i)) {
                     segment.setState(i, DONE)
                     expandBuffer()
                     return segment.retrieveElement(i)
@@ -613,7 +614,7 @@ internal open class BufferedChannel<E>(
                     if (segment.casState(i, state, RESUMING_R)) {
                         val helpExpandBuffer = state is WaiterEB
                         val sender = if (state is WaiterEB) state.waiter else state
-                        if (sender.tryResumeSender()) {
+                        if (sender.tryResumeSender(segment, i)) {
                             segment.setState(i, DONE)
                             return segment.retrieveElement(i).also { expandBuffer() }
                         } else {
@@ -631,14 +632,23 @@ internal open class BufferedChannel<E>(
         i: Int,
         helpExpandBuffer: Boolean
     ) {
-        onUndeliveredElement?.invoke(segment.retrieveElement(i))
         if (!segment.casState(i, RESUMING_R, INTERRUPTED_R) || helpExpandBuffer)
             expandBuffer()
     }
 
-    private fun Any.tryResumeSender(): Boolean = when {
+    private fun Any.tryResumeSender(segment: ChannelSegment<E>, i: Int): Boolean = when {
         this is SelectInstance<*> -> {
-            this.trySelect(this@BufferedChannel, Unit)
+            this as SelectImplementation<*>
+            when (this.trySelectDetailed(this@BufferedChannel, Unit)) {
+                SUCCESSFUL -> true
+                REREGISTERING -> {
+                    false
+                }
+                ALREADY_SELECTED, CANCELLED -> {
+                    onUndeliveredElement?.invoke(segment.retrieveElement(i))
+                    false
+                }
+            }
         }
         this is CancellableContinuation<*> -> {
             this as CancellableContinuation<Unit>
@@ -646,7 +656,10 @@ internal open class BufferedChannel<E>(
                 if (it !== null) {
                     completeResume(it)
                     true
-                } else false
+                } else {
+                    onUndeliveredElement?.invoke(segment.retrieveElement(i))
+                    false
+                }
             }
         }
         else -> error("Unexpected waiter: $this")
@@ -716,12 +729,11 @@ internal open class BufferedChannel<E>(
                         if (segm.casState(i, state, WaiterEB(waiter = state))) return true
                     } else {
                         if (segm.casState(i, state, RESUMING_EB)) {
-                            return if (state.tryResumeSender()) {
+                            return if (state.tryResumeSender(segm, i)) {
                                 segm.setState(i, BUFFERED)
                                 true
                             } else {
                                 segm.setState(i, INTERRUPTED)
-                                onUndeliveredElement?.invoke(segm.retrieveElement(i))
                                 false
                             }
                         }
